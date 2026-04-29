@@ -15,8 +15,9 @@ PROCESSED_DIR = os.path.join(ROOT_DIR, 'data', 'processed')
 MODEL_PATH = os.path.join(ROOT_DIR, 'data', 'outputs', 'oraculo_xgboost.pkl')
 
 # --- CONFIGURACIÓN DE RIESGO Y CARTERA ---
-CAPITAL_TOTAL = 2000.0          # Dólares virtuales totales a invertir hoy
-TOP_N_ACCIONES = 2              # Número de acciones a comprar (Diversificación)
+CAPITAL_TOTAL = 3000.0          # Dólares virtuales totales a invertir hoy
+TOP_N_ACCIONES = 3              # Aumentamos a 3 para diversificar
+MIN_PROBABILIDAD = 0.54         # Solo operar si la IA está +54% segura
 TAKE_PROFIT_PCT = 1.02          # +2.0% de ganancia
 STOP_LOSS_PCT = 0.985           # -1.5% de pérdida
 
@@ -73,7 +74,7 @@ def buscar_mejores_acciones():
             pred = modelo.predict(X_pred)[0]
             proba = modelo.predict_proba(X_pred)[0][pred]
             
-            if pred == 1:
+            if pred == 1 and proba >= MIN_PROBABILIDAD:
                 precio_actual = df['Close'].iloc[-1]
                 activos_alcistas.append((ticker, proba * 100, precio_actual))
                 
