@@ -31,6 +31,9 @@ El sistema se ejecuta diariamente de forma autónoma antes del cierre del mercad
 * **Integración Broker:** `ib_insync` (API de Interactive Brokers)
 * **Automatización:** Windows Task Scheduler, Archivos Batch (.bat)
 
+## ⚠️ Aviso Legal (Disclaimer)
+Este proyecto es estrictamente con fines educativos y de investigación. El código proporcionado no constituye asesoramiento financiero. El trading algorítmico conlleva un alto riesgo de pérdida de capital. Se recomienda encarecidamente utilizar este sistema única y exclusivamente en entornos de simulación (Paper Trading) y no con dinero real. El autor no se hace responsable de ninguna pérdida financiera incurrida por el uso de este software.
+
 ## 📁 Estructura del Proyecto
 
 ```text
@@ -47,7 +50,3 @@ Oraculo_V2/
 │
 ├── ejecutar_ritual.bat    # Script maestro de automatización
 └── README.md
-
-
-## ⚠️ Aviso Legal (Disclaimer)
-Este proyecto es estrictamente con fines educativos y de investigación. El código proporcionado no constituye asesoramiento financiero. El trading algorítmico conlleva un alto riesgo de pérdida de capital. Se recomienda encarecidamente utilizar este sistema única y exclusivamente en entornos de simulación (Paper Trading) y no con dinero real. El autor no se hace responsable de ninguna pérdida financiera incurrida por el uso de este software.
