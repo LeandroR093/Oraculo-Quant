@@ -1,0 +1,26 @@
+# --- DATOS Y MODELOS (Propiedad Intelectual y peso) ---
+data/
+*.pkl
+*.parquet
+*.csv
+
+# --- SEGURIDAD (Claves y Tokens) ---
+.env
+src/utils/config.py
+#  ignora el archivo:
+src/utils/telegram_bot.py
+
+# --- PYTHON Y VS CODE ---
+__pycache__/
+*.pyc
+.vscode/
+.ipynb_checkpoints/
+
+# --- ENTORNOS VIRTUALES ---
+venv/
+env/
+
+# --- ARCHIVOS GENERADOS Y LOGS ---
+*.log
+resultados_modelo.txt
+
