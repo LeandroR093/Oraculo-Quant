@@ -8,6 +8,24 @@ import warnings
 from ib_insync import *
 warnings.filterwarnings('ignore')
 
+# --- KILL SWITCH: CALENDARIO DE MERCADO ---
+import pandas_market_calendars as mcal
+from datetime import datetime
+import pytz
+import sys
+
+def es_dia_de_mercado():
+    """Verifica si hoy es un día hábil en Wall Street (NYSE)."""
+    nyse = mcal.get_calendar('NYSE')
+    hoy_ny = datetime.now(pytz.timezone('America/New_York')).strftime('%Y-%m-%d')
+    dias_habiles = nyse.valid_days(start_date=hoy_ny, end_date=hoy_ny)
+    return len(dias_habiles) > 0
+
+if not es_dia_de_mercado():
+    print("🛑 El mercado está cerrado hoy (Fin de semana o Festivo).")
+    print("💤 El Oráculo Quant volverá a dormir. Abortando ejecución.")
+    sys.exit()
+
 # --- RUTAS ---
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
@@ -133,7 +151,9 @@ def ejecutar_ordenes_bracket():
             bracket.parent.orderType = 'MKT'
             bracket.parent.limitPrice = 0.0
             
+            # Asignamos Vigencia GTC (Good Till Cancelled) a toda la Bracket
             for orden in bracket:
+                orden.tif = 'GTC'
                 ib.placeOrder(accion, orden)
                 
             print(f"🚀 Órdenes enviadas para {ticker}.\n")
