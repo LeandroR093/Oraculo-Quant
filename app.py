@@ -10,6 +10,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from indicators import calcular_indicadores_grid, formatear_valor
 from simulation import ejecutar_monte_carlo
+import s3fs  # <-- NUEVO: Traductor para AWS
 
 st.set_page_config(page_title="Advanced Quant Trading Platform", page_icon="📈", layout="wide")
 
@@ -34,30 +35,59 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- RUTAS INTELIGENTES ---
+# --- RUTAS INTELIGENTES (DEV VS PROD) ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 BASE_DIR = os.path.dirname(current_dir) if os.path.basename(current_dir) == "src" else current_dir
 PROCESSED_DIR = os.path.join(BASE_DIR, 'data', 'processed')
 MODEL_PATH = os.path.join(BASE_DIR, 'data', 'outputs', 'oraculo_xgboost.pkl')
 
+# El interruptor mágico: Si no encuentra la variable, asume que estás en tu PC
+ENTORNO = os.environ.get('ENTORNO', 'local')
+BUCKET_NAME = "oraculo-quant-storage-lroldan"
+
 @st.cache_resource
 def cargar_oraculo():
-    try:
-        with open(MODEL_PATH, 'rb') as f:
-            modelo = pickle.load(f)
-    except Exception:
-        modelo = None
-    archivos_parquet = glob.glob(os.path.join(PROCESSED_DIR, "*.parquet"))
-    tickers = sorted([os.path.basename(f).replace('.parquet', '') for f in archivos_parquet])
+    if ENTORNO == 'produccion':
+        # MODO NUBE (AWS S3)
+        try:
+            fs = s3fs.S3FileSystem()
+            with fs.open(f's3://{BUCKET_NAME}/models/oraculo_xgboost.pkl', 'rb') as f:
+                modelo = pickle.load(f)
+            
+            # Busca qué tickers hay en S3 para el menú lateral
+            archivos_s3 = fs.ls(f'{BUCKET_NAME}/processed/')
+            tickers = sorted([os.path.basename(f).replace('.parquet', '') for f in archivos_s3 if f.endswith('.parquet')])
+        except Exception as e:
+            st.error(f"Error cargando desde AWS: {e}")
+            modelo, tickers = None, []
+    else:
+        # MODO LOCAL (Tu PC)
+        try:
+            with open(MODEL_PATH, 'rb') as f:
+                modelo = pickle.load(f)
+        except Exception:
+            modelo = None
+        archivos_parquet = glob.glob(os.path.join(PROCESSED_DIR, "*.parquet"))
+        tickers = sorted([os.path.basename(f).replace('.parquet', '') for f in archivos_parquet])
+        
     return modelo, tickers
 
 modelo_ml, lista_tickers = cargar_oraculo()
 
 @st.cache_data(ttl=3600)
 def descargar_datos(ticker):
-    filepath = os.path.join(PROCESSED_DIR, f"{ticker}.parquet")
-    if os.path.exists(filepath):
-        df = pd.read_parquet(filepath)
+    try:
+        # Elegir de dónde beber los datos
+        if ENTORNO == 'produccion':
+            filepath = f"s3://{BUCKET_NAME}/processed/{ticker}.parquet"
+            df = pd.read_parquet(filepath)
+        else:
+            filepath = os.path.join(PROCESSED_DIR, f"{ticker}.parquet")
+            if not os.path.exists(filepath):
+                return pd.DataFrame()
+            df = pd.read_parquet(filepath)
+
+        # La limpieza de datos es idéntica sin importar de dónde vengan
         if 'Date' not in df.columns and 'index' in df.columns:
             df = df.rename(columns={'index': 'Date'})
         elif 'Date' not in df.columns:
@@ -70,7 +100,10 @@ def descargar_datos(ticker):
             df = df[~df.index.duplicated(keep='last')]
             df.sort_index(inplace=True)
         return df
-    return pd.DataFrame()
+        
+    except Exception as e:
+        st.warning(f"No se pudo cargar {ticker}: {e}")
+        return pd.DataFrame()
 
 # --- SIDEBAR ---
 with st.sidebar:
