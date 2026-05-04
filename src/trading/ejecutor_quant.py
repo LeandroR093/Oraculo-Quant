@@ -31,6 +31,8 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
 PROCESSED_DIR = os.path.join(ROOT_DIR, 'data', 'processed')
 MODEL_PATH = os.path.join(ROOT_DIR, 'data', 'outputs', 'oraculo_xgboost.pkl')
+# --- NUEVA RUTA PARA TELEGRAM ---
+OPERACIONES_PATH = os.path.join(ROOT_DIR, 'data', 'outputs', 'operaciones_hoy.csv')
 
 # --- CONFIGURACIÓN DE RIESGO Y CARTERA ---
 CAPITAL_TOTAL = 3000.0          # Dólares virtuales totales a invertir hoy
@@ -108,8 +110,13 @@ def buscar_mejores_acciones():
 def ejecutar_ordenes_bracket():
     mejores_acciones = buscar_mejores_acciones()
     
+    # --- LISTA PARA GUARDAR EL REPORTE DE TELEGRAM ---
+    operaciones_ejecutadas = []
+
     if not mejores_acciones:
         print("⚠️ El Oráculo no encontró oportunidades claras hoy. Manteniendo efectivo.")
+        # Guardamos un CSV vacío para que Telegram sepa que hoy no se operó
+        pd.DataFrame(columns=['Ticker', 'Accion', 'Cantidad']).to_csv(OPERACIONES_PATH, index=False)
         return
 
     # Dividimos el capital equitativamente entre las acciones seleccionadas
@@ -157,6 +164,14 @@ def ejecutar_ordenes_bracket():
                 ib.placeOrder(accion, orden)
                 
             print(f"🚀 Órdenes enviadas para {ticker}.\n")
+            
+            # --- REGISTRAR OPERACIÓN EXITOSA PARA TELEGRAM ---
+            operaciones_ejecutadas.append({
+                'Ticker': ticker,
+                'Accion': 'COMPRA',
+                'Cantidad': cantidad_acciones
+            })
+
             ib.sleep(1) # Pequeña pausa para no saturar al broker
             
         print("✅ TODAS LAS OPERACIONES FUERON ENVIADAS A WALL STREET.")
@@ -165,6 +180,12 @@ def ejecutar_ordenes_bracket():
         print(f"❌ Error de ejecución en IBKR: {e}")
     finally:
         ib.disconnect()
+        
+        # --- CREAR EL ARCHIVO PARA EL BOT DE TELEGRAM ---
+        # Se ejecuta siempre al final, asegurando que pasamos la info correcta
+        df_ops = pd.DataFrame(operaciones_ejecutadas, columns=['Ticker', 'Accion', 'Cantidad'])
+        df_ops.to_csv(OPERACIONES_PATH, index=False)
+        print(f"📝 Archivo de operaciones guardado para Telegram en: {OPERACIONES_PATH}")
 
 if __name__ == "__main__":
     ejecutar_ordenes_bracket()

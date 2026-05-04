@@ -3,6 +3,7 @@ import gc
 import time
 import random
 import logging
+from datetime import timedelta
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
@@ -39,6 +40,10 @@ class StorageBackend(ABC):
     def save(self, df: pd.DataFrame, identifier: str) -> None:
         pass
 
+    @abstractmethod
+    def load(self, identifier: str) -> pd.DataFrame:
+        pass
+
 class LocalParquetStorage(StorageBackend):
     def __init__(self, base_path: str):
         self.base_path = base_path
@@ -57,6 +62,11 @@ class LocalParquetStorage(StorageBackend):
         # Guardamos usando pyarrow y compresión snappy (requerimiento institucional)
         df.to_parquet(filepath, engine='pyarrow', compression='snappy')
         logger.debug(f"Guardado exitosamente en crudo: {filepath}")
+
+    def load(self, identifier: str) -> pd.DataFrame:
+        filepath = self._get_filepath(identifier)
+        # Leemos el archivo parquet existente
+        return pd.read_parquet(filepath, engine='pyarrow')
 
 # ==============================================================================
 # LÓGICA DE EXTRACCIÓN DE TICKERS S&P 500 Y GICS SECTOR
@@ -103,33 +113,66 @@ class DataIngestionPipeline:
 
     def fetch_and_save(self, ticker: str, sector: str = "Unknown"):
         """
-        Descarga todo el historial disponible para un ticker dado y lo guarda en el storage.
+        Descarga el historial de un ticker. Si ya existe, hace una sincronización incremental.
         """
-        if self.storage.exists(ticker):
-            logger.info(f"[{ticker}] SALTADO - Ya existe en la base de datos.")
-            return
+        df_existente = None
+        fecha_inicio = None
 
-        logger.info(f"[{ticker}] Iniciando descarga... | Sector: {sector}")
+        # 1. VERIFICAR Y LEER LA ÚLTIMA FECHA
+        if self.storage.exists(ticker):
+            try:
+                df_existente = self.storage.load(ticker)
+                
+                # Asumiendo que el índice de yfinance es la fecha (DatetimeIndex)
+                ultima_fecha = pd.to_datetime(df_existente.index.max())
+                
+                # Sumamos 1 día para no duplicar el último día que ya tenemos
+                fecha_inicio = (ultima_fecha + timedelta(days=1)).strftime('%Y-%m-%d')
+                logger.info(f"[{ticker}] Archivo encontrado. Actualizando desde {fecha_inicio}...")
+                
+            except Exception as e:
+                logger.warning(f"[{ticker}] No se pudo leer el archivo existente ({e}). Se forzará descarga completa.")
+        else:
+            logger.info(f"[{ticker}] Iniciando descarga completa por primera vez... | Sector: {sector}")
+
         try:
             # Rate Limiter Aleatorio (1 a 3 segundos) para evitar ban de IP (429 Too Many Requests)
             sleep_time = random.uniform(1.0, 3.0)
             time.sleep(sleep_time)
 
             ticker_obj = yf.Ticker(ticker)
-            # Extracción del Dataset completo al máximo historial.
-            # Mantenemos auto_adjust=False para retener tanto "Close" crudo como "Adj Close" si existe.
-            df = ticker_obj.history(period="max", auto_adjust=False)
 
-            if df.empty:
-                logger.warning(f"[{ticker}] ADVERTENCIA - DataFrame vacío devuelto. El activo puede estar deslistado o ser inválido.")
-                return
+            # 2. DESCARGAR (INCREMENTAL O COMPLETA)
+            if fecha_inicio:
+                # Descarga incremental
+                df_nuevo = ticker_obj.history(start=fecha_inicio, auto_adjust=False)
+                
+                if df_nuevo.empty:
+                    logger.info(f"[{ticker}] SALTADO - Ya está completamente al día.")
+                    return
+                
+                # Asegurar que el nuevo DataFrame tenga la columna del sector antes de unir
+                df_nuevo['GICS_Sector'] = sector
+                
+                # Unir datos viejos con nuevos
+                df = pd.concat([df_existente, df_nuevo])
+                # Eliminar duplicados por índice (fechas) por seguridad
+                df = df[~df.index.duplicated(keep='last')]
+                logger.info(f"[{ticker}] Sincronizado: Se añadieron {len(df_nuevo)} filas nuevas. Total: {len(df)}.")
+                
+            else:
+                # Descarga completa original
+                df = ticker_obj.history(period="max", auto_adjust=False)
+                
+                if df.empty:
+                    logger.warning(f"[{ticker}] ADVERTENCIA - DataFrame vacío devuelto. El activo puede estar deslistado o ser inválido.")
+                    return
+                
+                df['GICS_Sector'] = sector
+                logger.info(f"[{ticker}] ÉXITO - {len(df)} registros procesados y guardados (Historial completo).")
 
-            # Agregar el Sector GICS como feature base general (útil para Machine Learning)
-            df['GICS_Sector'] = sector
-
-            # Guardar el DataFrame
+            # Guardar el DataFrame final
             self.storage.save(df, ticker)
-            logger.info(f"[{ticker}] ÉXITO - {len(df)} registros procesados y guardados.")
 
         except Exception as e:
             logger.error(f"[{ticker}] ERROR DURANTE DESCARGA - {e}")
@@ -138,6 +181,10 @@ class DataIngestionPipeline:
             # Optimizacion extrema de memoria: Limpiamos por cada iteración.
             if 'df' in locals():
                 del df
+            if 'df_existente' in locals():
+                del df_existente
+            if 'df_nuevo' in locals():
+                del df_nuevo
             gc.collect()
 
 def main():

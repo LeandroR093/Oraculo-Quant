@@ -4,6 +4,9 @@ import glob
 import logging
 import pandas as pd
 import numpy as np
+import boto3
+from botocore.exceptions import NoCredentialsError, PartialCredentialsError
+from dotenv import load_dotenv
 
 # Core library Quantitative de Technical Analysis
 from ta.momentum import RSIIndicator
@@ -12,8 +15,10 @@ from ta.volume import ChaikinMoneyFlowIndicator
 from ta.volatility import BollingerBands
 
 # ==============================================================================
-# CONFIGURACIÓN DE LOGGING
+# CONFIGURACIÓN DE ENTORNO Y LOGGING
 # ==============================================================================
+load_dotenv()
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
@@ -23,6 +28,39 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
+
+# Configuración S3 desde variables de entorno (.env)
+AWS_ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID")
+AWS_SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY")
+AWS_REGION = os.getenv("AWS_DEFAULT_REGION", "eu-north-1") # Por defecto la región de tu captura anterior
+S3_BUCKET_NAME = "oraculo-quant-storage-lroldan"
+
+# ==============================================================================
+# LÓGICA DE S3
+# ==============================================================================
+def upload_to_s3(local_file_path: str, s3_key: str):
+    """Sube un archivo a un bucket S3 de AWS."""
+    if not all([AWS_ACCESS_KEY, AWS_SECRET_KEY, S3_BUCKET_NAME]):
+        logger.warning(f"Faltan credenciales de AWS. Saltando subida de {s3_key}")
+        return False
+
+    s3_client = boto3.client(
+        's3',
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_KEY,
+        region_name=AWS_REGION
+    )
+
+    try:
+        s3_client.upload_file(local_file_path, S3_BUCKET_NAME, s3_key)
+        logger.debug(f"Subido a S3: s3://{S3_BUCKET_NAME}/{s3_key}")
+        return True
+    except (NoCredentialsError, PartialCredentialsError):
+        logger.error("Credenciales de AWS inválidas.")
+        return False
+    except Exception as e:
+        logger.error(f"Error al subir a S3 {s3_key}: {e}")
+        return False
 
 # ==============================================================================
 # LÓGICA DE CÁLCULO VECTORIZADO DE FEATURES (V1 + V2 REFACTORED)
@@ -139,7 +177,7 @@ def main():
         logger.error("No se hallaron archivos `.parquet`. Revisa la Fase 1.")
         return
 
-    logger.info(f"Injectando Machine Learning Library a {total_files} activos. El proceso iniciará...")
+    logger.info(f"Injectando Machine Learning Library a {total_files} activos y sincronizando con AWS S3...")
 
     procesados_con_exito = 0
 
@@ -160,9 +198,13 @@ def main():
                 logger.warning(f"[{ticker}] DESCARTADO: Escasez de historial (<200 ds) para cálculo de modelos formales.")
                 continue
 
-            # Serializado Snappy
+            # Serializado Snappy Local
             dest_filepath = os.path.join(processed_dir, filename)
             df_enriched.to_parquet(dest_filepath, engine='pyarrow', compression='snappy')
+            
+            # Subida a AWS S3
+            s3_key = f"processed/{filename}"
+            upload_to_s3(dest_filepath, s3_key)
             
             procesados_con_exito += 1
 
@@ -175,7 +217,7 @@ def main():
             gc.collect()
 
     logger.info("="*60)
-    logger.info(f"=== Operación Fase 2 Exitosa. Total Exportados: {procesados_con_exito}/{total_files} ===")
+    logger.info(f"=== Operación Fase 2 Exitosa. Total Exportados y Subidos: {procesados_con_exito}/{total_files} ===")
     logger.info("="*60)
 
 if __name__ == "__main__":
