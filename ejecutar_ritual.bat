@@ -1,25 +1,45 @@
 @echo off
-echo === INICIANDO PIPELINE DEL ORACULO V2 ===
+echo ====================================================
+echo   🔮 INICIANDO PIPELINE DEL ORACULO V2 (SWING) 🔮
+echo ====================================================
 :: Nos movemos a la carpeta del proyecto
 cd /d "C:\Users\rolda\Oraculo V2"
 
-echo 1/7 Actualizando datos (Ingesta)...
+echo.
+echo [1/7] Actualizando datos (Ingesta)...
 python src/ingesta.py
 
-echo 2/7 Construyendo Features...
+echo.
+echo [2/7] Construyendo Features e Indicadores...
 python src/features/build_features.py
 
-echo 3/7 Sincronizando Macro...
+echo.
+echo [3/7] Sincronizando datos Macro y VIX...
 python src/updater.py
 
-echo 4/7 Re-entrenando IA...
+echo.
+echo [4/7] Re-entrenando modelo IA (XGBoost)...
 python src/models/train_xgboost.py
 
-echo 5/7 Ejecutando operacion en Wall Street (Broker)...
+echo.
+echo [5/7] Generando señales y calculando TP/SL (+2%% / -1.5%%)...
 python src/trading/ejecutor_quant.py
 
-echo 6/7 Enviando reporte final a Telegram...
+echo.
+echo [6/7] Difundiendo alertas al Canal de Telegram...
 python src/utils/telegram_bot.py
 
-echo === TODO SINCRONIZADO ===
+echo.
+echo [7/7] Subiendo datos actualizados a GitHub y Render...
+:: Añadimos solo las carpetas de datos y código a Git (respeta tu .gitignore)
+git add .
+:: Creamos el commit de forma silenciosa con un mensaje automático
+git commit -m "🤖 Auto-update diario Oráculo: Señales y datos"
+:: Subimos a GitHub (esto dispara la actualización en Render)
+git push origin main
+
+echo.
+echo ====================================================
+echo   ✅ RITUAL COMPLETADO: SEÑALES Y WEB ACTUALIZADAS
+echo ====================================================
 pause

@@ -5,15 +5,14 @@ import pandas as pd
 import ta
 import math
 import warnings
-from ib_insync import *
-warnings.filterwarnings('ignore')
-
-# --- KILL SWITCH: CALENDARIO DE MERCADO ---
-import pandas_market_calendars as mcal
 from datetime import datetime
 import pytz
 import sys
+import pandas_market_calendars as mcal
 
+warnings.filterwarnings('ignore')
+
+# --- KILL SWITCH: CALENDARIO DE MERCADO ---
 def es_dia_de_mercado():
     """Verifica si hoy es un día hábil en Wall Street (NYSE)."""
     nyse = mcal.get_calendar('NYSE')
@@ -31,11 +30,10 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 ROOT_DIR = os.path.dirname(os.path.dirname(CURRENT_DIR))
 PROCESSED_DIR = os.path.join(ROOT_DIR, 'data', 'processed')
 MODEL_PATH = os.path.join(ROOT_DIR, 'data', 'outputs', 'oraculo_xgboost.pkl')
-# --- NUEVA RUTA PARA TELEGRAM ---
 OPERACIONES_PATH = os.path.join(ROOT_DIR, 'data', 'outputs', 'operaciones_hoy.csv')
 
 # --- CONFIGURACIÓN DE RIESGO Y CARTERA ---
-CAPITAL_TOTAL = 3000.0          # Dólares virtuales totales a invertir hoy
+CAPITAL_TOTAL = 3000.0          # Dólares virtuales totales a simular hoy
 TOP_N_ACCIONES = 3              # Aumentamos a 3 para diversificar
 MIN_PROBABILIDAD = 0.54         # Solo operar si la IA está +54% segura
 TAKE_PROFIT_PCT = 1.02          # +2.0% de ganancia
@@ -101,91 +99,48 @@ def buscar_mejores_acciones():
         except Exception: pass
             
     if activos_alcistas:
-        # Ordenamos de mayor a menor confianza
         activos_alcistas.sort(key=lambda x: x[1], reverse=True)
-        # Devolvemos solo las Top N seleccionadas
         return activos_alcistas[:TOP_N_ACCIONES]
     return []
 
 def ejecutar_ordenes_bracket():
     mejores_acciones = buscar_mejores_acciones()
     
-    # --- LISTA PARA GUARDAR EL REPORTE DE TELEGRAM ---
+    # --- LISTA ENRIQUECIDA PARA GUARDAR EN EL CSV ---
     operaciones_ejecutadas = []
 
     if not mejores_acciones:
-        print("⚠️ El Oráculo no encontró oportunidades claras hoy. Manteniendo efectivo.")
-        # Guardamos un CSV vacío para que Telegram sepa que hoy no se operó
-        pd.DataFrame(columns=['Ticker', 'Accion', 'Cantidad']).to_csv(OPERACIONES_PATH, index=False)
+        print("⚠️ El Oráculo no encontró oportunidades claras hoy.")
+        # Guardamos CSV con las nuevas columnas vacías
+        pd.DataFrame(columns=['Ticker', 'Accion', 'Confianza', 'Precio_Ref', 'Take_Profit', 'Stop_Loss']).to_csv(OPERACIONES_PATH, index=False)
         return
 
-    # Dividimos el capital equitativamente entre las acciones seleccionadas
-    capital_por_accion = CAPITAL_TOTAL / len(mejores_acciones)
+    print(f"\n🔥 Se han identificado {len(mejores_acciones)} oportunidades alcistas para hoy:\n")
     
-    ib = IB()
-    try:
-        ib.connect('127.0.0.1', 7497, clientId=3)
-        print("✅ Conectado a Interactive Brokers.")
-        print(f"💼 Capital total a invertir: ${CAPITAL_TOTAL} USD dividido en {len(mejores_acciones)} activos.\n")
+    for ticker, confianza, precio_ref in mejores_acciones:
+        print(f"🎯 SEÑAL DETECTADA: {ticker} (Confianza: {confianza:.1f}%) | Ref: ${precio_ref:.2f}")
         
-        for ticker, confianza, precio_ref in mejores_acciones:
-            print(f"🎯 PREPARANDO: {ticker} (Confianza: {confianza:.1f}%) | Ref: ${precio_ref:.2f}")
-            
-            accion = Stock(ticker, 'SMART', 'USD')
-            ib.qualifyContracts(accion)
-            
-            cantidad_acciones = math.floor(capital_por_accion / precio_ref)
-            if cantidad_acciones < 1: 
-                print(f"⚠️ Capital insuficiente para comprar 1 acción de {ticker}. Saltando...")
-                continue
-                
-            precio_tp = round(precio_ref * TAKE_PROFIT_PCT, 2)
-            precio_sl = round(precio_ref * STOP_LOSS_PCT, 2)
-            
-            print(f"   -> Comprando {cantidad_acciones} acciones")
-            print(f"   -> TP: ${precio_tp} | SL: ${precio_sl}")
-            
-            # Orden Bracket
-            bracket = ib.bracketOrder(
-                'BUY', 
-                cantidad_acciones, 
-                limitPrice=round(precio_ref, 2), 
-                takeProfitPrice=precio_tp, 
-                stopLossPrice=precio_sl
-            )
-            
-            # Aseguramos entrada a mercado
-            bracket.parent.orderType = 'MKT'
-            bracket.parent.limitPrice = 0.0
-            
-            # Asignamos Vigencia GTC (Good Till Cancelled) a toda la Bracket
-            for orden in bracket:
-                orden.tif = 'GTC'
-                ib.placeOrder(accion, orden)
-                
-            print(f"🚀 Órdenes enviadas para {ticker}.\n")
-            
-            # --- REGISTRAR OPERACIÓN EXITOSA PARA TELEGRAM ---
-            operaciones_ejecutadas.append({
-                'Ticker': ticker,
-                'Accion': 'COMPRA',
-                'Cantidad': cantidad_acciones
-            })
-
-            ib.sleep(1) # Pequeña pausa para no saturar al broker
-            
-        print("✅ TODAS LAS OPERACIONES FUERON ENVIADAS A WALL STREET.")
-
-    except Exception as e:
-        print(f"❌ Error de ejecución en IBKR: {e}")
-    finally:
-        ib.disconnect()
+        precio_tp = round(precio_ref * TAKE_PROFIT_PCT, 2)
+        precio_sl = round(precio_ref * STOP_LOSS_PCT, 2)
         
-        # --- CREAR EL ARCHIVO PARA EL BOT DE TELEGRAM ---
-        # Se ejecuta siempre al final, asegurando que pasamos la info correcta
-        df_ops = pd.DataFrame(operaciones_ejecutadas, columns=['Ticker', 'Accion', 'Cantidad'])
-        df_ops.to_csv(OPERACIONES_PATH, index=False)
-        print(f"📝 Archivo de operaciones guardado para Telegram en: {OPERACIONES_PATH}")
+        print(f"   -> Target TP: ${precio_tp} | Stop SL: ${precio_sl}\n")
+        
+        # Guardamos todos los datos estratégicos en lugar de solo la cantidad
+        operaciones_ejecutadas.append({
+            'Ticker': ticker,
+            'Accion': 'COMPRA',
+            'Confianza': round(confianza, 1),
+            'Precio_Ref': round(precio_ref, 2),
+            'Take_Profit': precio_tp,
+            'Stop_Loss': precio_sl
+        })
+        
+    print("✅ SEÑALES GENERADAS CON ÉXITO (SIN CONEXIÓN A BRÓKER).")
+
+    # Guardamos el archivo CSV enriquecido para que lo lea el bot de Telegram
+    df_ops = pd.DataFrame(operaciones_ejecutadas)
+    df_ops.to_csv(OPERACIONES_PATH, index=False)
+    print(f"📝 Archivo de señales guardado en: {OPERACIONES_PATH}")
 
 if __name__ == "__main__":
     ejecutar_ordenes_bracket()
