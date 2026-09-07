@@ -207,6 +207,11 @@ def main():
     # Unión de tuplas: (Ticker, Sector)
     universe = additional_assets + sp500_assets
 
+    # FILTRO DE SEGURIDAD / LISTA NEGRA
+    # ==============================================================================
+    BLACKLIST = {"SATS"} 
+    universe = [item for item in universe if item[0] not in BLACKLIST]
+
     # 3. Ejecutar Pipeline
     logger.info("="*60)
     logger.info("=== Iniciando Pipeline de Ingesta Oráculo V2 ===")
