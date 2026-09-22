@@ -209,7 +209,7 @@ def main():
 
     # FILTRO DE SEGURIDAD / LISTA NEGRA
     # ==============================================================================
-    BLACKLIST = {"SATS"} 
+    BLACKLIST = {"SATS", "CTRA"} 
     universe = [item for item in universe if item[0] not in BLACKLIST]
 
     # 3. Ejecutar Pipeline
